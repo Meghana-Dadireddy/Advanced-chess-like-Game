@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Chess-like Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: black;
+            color: white;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(5, 60px);
+            grid-template-rows: repeat(5, 60px);
+            gap: 5px;
+            margin-top: 20px;
+        }
+
+        .cell {
+            width: 60px;
+            height: 60px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .playerA {
+            background-color: #add8e6;
+        }
+
+        .playerB {
+            background-color: #f08080;
+        }
+
+        .selected {
+            border: 2px solid yellow;
+            background-color: black; 
+        }
+
+        #move-options {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            color:black;
+        }
+        #status {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        .move-option {
+            padding: 5px 10px;
+            background-color: #4CAF50; 
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #move-log {
+            margin-top: 20px;
+            max-width: 300px;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            background-color: #333;
+            padding: 10px;
+            list-style-type: none;
+        }
+
+        #move-log li {
+            margin-bottom: 5px;
+        }
+
+        #move-log li .capture {
+            color: red;
+        }
+
+        #game-over {
+            background-color: #28a745;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        #game-over span {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Advanced Chess-like Game</h1>
+    <div id="board"></div>
+    <div id="status">Waiting for game to start...</div>
+    <div id="move-options">
+        <button class="move-option" onclick="move('L')">Left</button>
+        <button class="move-option" onclick="move('R')">Right</button>
+        <button class="move-option" onclick="move('F')">Forward</button>
+        <button class="move-option" onclick="move('B')">Backward</button>
+        <button class="move-option" onclick="move('FL')">Forward-Left</button>
+        <button class="move-option" onclick="move('FR')">Forward-Right</button>
+        <button class="move-option" onclick="move('BL')">Backward-Left</button>
+        <button class="move-option" onclick="move('BR')">Backward-Right</button>
+    </div>
+    <ul id="move-log"></ul>
+    <div id="game-over" style="display: none;">
+        <h2>Congratulations!! The Winner is </h2>
+        <p id="winner"></p>
+    </div>
+    
+    <script>
+        const socket = new WebSocket('ws://localhost:8080');
+
+        socket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+
+    if (message.type === 'gameState') {
+        window.gameState = message.gameState;
+        updateStatus(message.gameState.currentPlayer);
+        renderGrid(message.gameState);
+    } else if (message.type === 'invalidMove') {
+        alert('Invalid move: ' + message.reason);
+    } else if (message.type === 'game-over') {
+        const winnerName = message.winner;
+        document.getElementById('winner').textContent = winnerName;
+        document.getElementById('game-over').style.display = 'block';
+        setTimeout(() => {
+            resetBoard();
+            alert("Congratulations winner is "+winnerName);
+            alert('New game starting soon...');
+            socket.send(JSON.stringify({ type: 'newGame' })); 
+        }, 2000); 
+    }
+};
+        function renderGrid(gameState) {
+            const board = document.getElementById('board');
+            board.innerHTML = ''; 
+
+            gameState.grid.forEach((row, rowIndex) => {
+                row.forEach((cell, colIndex) => {
+                    const cellDiv = document.createElement('div');
+                    cellDiv.className = 'cell';
+                    if (cell) {
+                        cellDiv.textContent = cell.name;
+                        cellDiv.classList.add(cell.player === 'A' ? 'playerA' : 'playerB');
+                        cellDiv.dataset.row = rowIndex;
+                        cellDiv.dataset.col = colIndex;
+                        cellDiv.onclick = () => selectCharacter(rowIndex, colIndex);
+                    }
+                    if (gameState.selectedCharacter && 
+                        gameState.selectedCharacter.position[0] === rowIndex && 
+                        gameState.selectedCharacter.position[1] === colIndex) {
+                        cellDiv.classList.add('selected');
+                    }
+                    board.appendChild(cellDiv);
+                });
+            });
+
+            document.getElementById('status').textContent = `Current Player: ${gameState.currentPlayer}`;
+            document.getElementById('selected-character').textContent = `Selected: ${gameState.selectedCharacter ? gameState.selectedCharacter.name : 'None'}`;
+        }
+        function updateStatus(currentPlayer) {
+            document.getElementById('status').textContent = `Current Player: ${currentPlayer}`;
+        }
+
+        function selectCharacter(row, col) {
+            const gameState = window.gameState;
+            const character = gameState.grid[row][col];
+            if (character && character.player === gameState.currentPlayer) {
+                gameState.selectedCharacter = gameState.players[character.player].characters.find(char => 
+                    char.position[0] === row && char.position[1] === col
+                );
+                renderGrid(gameState);
+            }
+        }
+        function move(direction) {
+            const gameState = window.gameState;
+            if (gameState.selectedCharacter) {
+                const charIndex = gameState.players[gameState.currentPlayer].characters.indexOf(gameState.selectedCharacter);
+                const selectedCharacterName = gameState.selectedCharacter.name; // Get the character's name
+                socket.send(JSON.stringify({
+                    type: 'move',
+                    player: gameState.currentPlayer,
+                    characterIndex: charIndex,
+                    move: direction
+                }));
+                addMoveToLog(`Player ${gameState.currentPlayer}: ${selectedCharacterName} - ${direction}`);
+                gameState.selectedCharacter = null; 
+            }
+        }
+        function addMoveToLog(moveText) {
+            const moveLog = document.getElementById('move-log');
+            const listItem = document.createElement('li');
+            listItem.textContent = moveText;
+            moveLog.appendChild(listItem);
+        }
+
+    function resetBoard() {
+    const board = document.getElementById('board');
+    board.innerHTML = ''; 
+    document.getElementById('move-log').innerHTML = ''; 
+    document.getElementById('game-over').style.display = 'none'; 
+    updateStatus('Waiting for new game...');
+}
+
+    </script>
+</body>
+</html>
